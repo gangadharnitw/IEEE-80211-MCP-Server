@@ -5,7 +5,16 @@ import json
 import re
 import base64
 import os
+import argparse
 from io import BytesIO
+
+# Mapping of spec identifiers to human-readable names
+SPEC_NAMES = {
+    "80211be": "IEEE 802.11be (Wi-Fi 7)",
+    "80211bn": "IEEE 802.11bn (Wi-Fi 8)",
+    "80211ax": "IEEE 802.11ax (Wi-Fi 6)",
+    "80211ac": "IEEE 802.11ac (Wi-Fi 5)",
+}
 
 
 def infer_section_level(title):
@@ -67,11 +76,19 @@ def extract_tables(doc):
     return tables
 
 
-def extract_figures(doc, output_dir="figures"):
+def extract_figures(doc, output_dir="figures", spec=None):
     """
     Extract figures from document with their captions.
     Saves images to files and stores base64 in the output.
+
+    Args:
+        doc: The parsed document
+        output_dir: Base directory for figures (will use output_dir/{spec}/ if spec provided)
+        spec: Specification identifier for organizing output
     """
+    # If spec is provided, use figures/{spec}/ subdirectory
+    if spec:
+        output_dir = os.path.join(output_dir, spec)
     items = list(doc.iterate_items())
     figures = []
 
@@ -139,13 +156,14 @@ def extract_figures(doc, output_dir="figures"):
     return figures
 
 
-def extract_sections(pdf_path, output_path):
+def extract_sections(pdf_path, output_path, spec=None):
     """
     Extract sections from a PDF file and save to JSON.
 
     Args:
         pdf_path: Path to the PDF file
         output_path: Path for the output JSON file
+        spec: Specification identifier (e.g., "80211be", "80211bn")
 
     Returns:
         List of extracted sections
@@ -201,15 +219,45 @@ def extract_sections(pdf_path, output_path):
 
     # Extract tables and figures
     tables = extract_tables(doc)
-    figures = extract_figures(doc)
+    figures = extract_figures(doc, spec=spec)
 
+    # Build output with spec metadata if provided
     output = {"sections": sections, "tables": tables, "figures": figures}
+    if spec:
+        output["spec"] = spec
+        output["spec_name"] = SPEC_NAMES.get(spec, f"IEEE 802.11 ({spec})")
+
     with open(output_path, "w") as f:
         json.dump(output, f, indent=2)
 
     print(f"Extracted {len(sections)} sections, {len(tables)} tables, {len(figures)} figures to {output_path}")
+    if spec:
+        print(f"Spec: {output['spec_name']}")
     return sections, tables, figures
 
 
 if __name__ == "__main__":
-    extract_sections("Test.pdf", "sections_output.json")
+    parser = argparse.ArgumentParser(
+        description="Extract sections, tables, and figures from IEEE 802.11 PDFs"
+    )
+    parser.add_argument("--pdf", required=True, help="Path to the PDF file")
+    parser.add_argument(
+        "--spec",
+        help="Specification identifier (e.g., '80211be', '80211bn')"
+    )
+    parser.add_argument(
+        "--output",
+        help="Output JSON filename (default: {spec}_output.json or sections_output.json)"
+    )
+
+    args = parser.parse_args()
+
+    # Determine output filename
+    if args.output:
+        output_path = args.output
+    elif args.spec:
+        output_path = f"{args.spec}_output.json"
+    else:
+        output_path = "sections_output.json"
+
+    extract_sections(args.pdf, output_path, spec=args.spec)

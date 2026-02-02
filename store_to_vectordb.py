@@ -17,21 +17,17 @@ def get_embedding_function():
     )
 
 
-def store_to_vectordb(json_path: str, db_path: str = "./chroma_db") -> chromadb.Collection:
+def store_to_vectordb(json_paths: list, db_path: str = "./chroma_db") -> chromadb.Collection:
     """
-    Load extracted data from JSON and store in ChromaDB.
+    Load extracted data from one or more JSON files and store in ChromaDB.
 
     Args:
-        json_path: Path to the sections_output.json file
+        json_paths: List of paths to JSON files (e.g., ["80211be_output.json", "80211bn_output.json"])
         db_path: Path for the persistent ChromaDB database
 
     Returns:
         The ChromaDB collection
     """
-    # Load extracted data
-    with open(json_path) as f:
-        data = json.load(f)
-
     # Initialize ChromaDB with persistent storage
     client = chromadb.PersistentClient(path=db_path)
 
@@ -47,51 +43,83 @@ def store_to_vectordb(json_path: str, db_path: str = "./chroma_db") -> chromadb.
 
     collection = client.create_collection(
         name="ieee_80211",
-        metadata={"description": "IEEE 802.11be specification content"},
+        metadata={"description": "IEEE 802.11 specification content (multi-spec)"},
         embedding_function=ef
     )
 
     documents = []
     metadatas = []
     ids = []
+    spec_counts = {}
 
-    # Add sections
-    for i, section in enumerate(data.get("sections", [])):
-        text = section.get("text", "")
-        if text and text.strip():  # Skip empty sections
-            documents.append(text)
-            metadatas.append({
-                "type": "section",
-                "title": section.get("section_title", ""),
-                "level": section.get("level", 0),
-                "page": section.get("page", 0)
-            })
-            ids.append(f"section_{i}")
+    # Process each JSON file
+    for json_path in json_paths:
+        print(f"\nProcessing: {json_path}")
+        with open(json_path) as f:
+            data = json.load(f)
 
-    # Add tables (markdown content)
-    for i, table in enumerate(data.get("tables", [])):
-        content = table.get("content", "")
-        if content and content.strip():
-            documents.append(content)
-            metadatas.append({
-                "type": "table",
-                "caption": table.get("caption", ""),
-                "page": table.get("page", 0)
-            })
-            ids.append(f"table_{i}")
+        # Get spec identifier from JSON metadata or filename
+        spec = data.get("spec", "")
+        if not spec:
+            # Try to infer from filename (e.g., "80211be_output.json" -> "80211be")
+            filename = Path(json_path).stem
+            if filename.endswith("_output"):
+                spec = filename.replace("_output", "")
+            else:
+                spec = filename
 
-    # Add figures (caption only, image referenced by path in metadata)
-    for i, figure in enumerate(data.get("figures", [])):
-        caption = figure.get("caption", "")
-        if caption and caption.strip():
-            documents.append(caption)
-            metadatas.append({
-                "type": "figure",
-                "caption": caption,
-                "page": figure.get("page", 0),
-                "image_path": figure.get("image_path", "")
-            })
-            ids.append(f"figure_{i}")
+        spec_name = data.get("spec_name", f"IEEE 802.11 ({spec})")
+        print(f"  Spec: {spec} ({spec_name})")
+
+        if spec not in spec_counts:
+            spec_counts[spec] = {"sections": 0, "tables": 0, "figures": 0}
+
+        # Add sections
+        for i, section in enumerate(data.get("sections", [])):
+            text = section.get("text", "")
+            if text and text.strip():
+                documents.append(text)
+                metadatas.append({
+                    "type": "section",
+                    "spec": spec,
+                    "spec_name": spec_name,
+                    "title": section.get("section_title", ""),
+                    "level": section.get("level", 0),
+                    "page": section.get("page", 0)
+                })
+                ids.append(f"{spec}_section_{i}")
+                spec_counts[spec]["sections"] += 1
+
+        # Add tables (markdown content)
+        for i, table in enumerate(data.get("tables", [])):
+            content = table.get("content", "")
+            if content and content.strip():
+                documents.append(content)
+                metadatas.append({
+                    "type": "table",
+                    "spec": spec,
+                    "spec_name": spec_name,
+                    "caption": table.get("caption", ""),
+                    "page": table.get("page", 0)
+                })
+                ids.append(f"{spec}_table_{i}")
+                spec_counts[spec]["tables"] += 1
+
+        # Add figures (caption only, image referenced by path in metadata)
+        for i, figure in enumerate(data.get("figures", [])):
+            caption = figure.get("caption", "")
+            if caption and caption.strip():
+                documents.append(caption)
+                metadatas.append({
+                    "type": "figure",
+                    "spec": spec,
+                    "spec_name": spec_name,
+                    "caption": caption,
+                    "page": figure.get("page", 0),
+                    "image_path": figure.get("image_path", "")
+                })
+                ids.append(f"{spec}_figure_{i}")
+                spec_counts[spec]["figures"] += 1
 
     # Store in ChromaDB
     if documents:
@@ -102,15 +130,15 @@ def store_to_vectordb(json_path: str, db_path: str = "./chroma_db") -> chromadb.
         )
 
     # Print summary
-    section_count = sum(1 for m in metadatas if m["type"] == "section")
-    table_count = sum(1 for m in metadatas if m["type"] == "table")
-    figure_count = sum(1 for m in metadatas if m["type"] == "figure")
-
+    print(f"\n{'='*50}")
     print(f"Stored {len(documents)} items in ChromaDB:")
-    print(f"  - Sections: {section_count}")
-    print(f"  - Tables: {table_count}")
-    print(f"  - Figures: {figure_count}")
-    print(f"Database path: {db_path}")
+    for spec, counts in spec_counts.items():
+        total = sum(counts.values())
+        print(f"\n  [{spec}] {total} items:")
+        print(f"    - Sections: {counts['sections']}")
+        print(f"    - Tables: {counts['tables']}")
+        print(f"    - Figures: {counts['figures']}")
+    print(f"\nDatabase path: {db_path}")
 
     return collection
 
@@ -163,7 +191,12 @@ def print_results(results: dict) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Store IEEE 802.11 content in ChromaDB")
-    parser.add_argument("--json", default="sections_output.json", help="Path to JSON file")
+    parser.add_argument(
+        "--json",
+        nargs="+",
+        default=["sections_output.json"],
+        help="Path(s) to JSON file(s). Can specify multiple files for multi-spec support."
+    )
     parser.add_argument("--db", default="./chroma_db", help="Path for ChromaDB")
     parser.add_argument("--query", help="Optional: run a search query after storing")
     parser.add_argument("--search-only", action="store_true", help="Only search, don't store")
@@ -179,7 +212,7 @@ if __name__ == "__main__":
         else:
             print("Error: --query required with --search-only")
     else:
-        # Store data
+        # Store data from all JSON files
         store_to_vectordb(args.json, args.db)
 
         # Run optional query
