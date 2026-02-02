@@ -29,3 +29,6 @@ Thumbs.db
 
 # Extracted data (can be regenerated)
 sections_output.json
+
+# SQLite database (can be regenerated)
+*.db
