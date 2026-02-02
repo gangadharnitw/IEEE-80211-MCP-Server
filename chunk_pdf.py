@@ -29,10 +29,26 @@ def infer_section_level(title):
     return 1
 
 
-def extract_tables(doc):
+def is_in_page_range(page, start_page, end_page):
+    """Check if a page number is within the specified range."""
+    if page is None:
+        return True  # Include items without page info
+    if start_page is not None and page < start_page:
+        return False
+    if end_page is not None and page > end_page:
+        return False
+    return True
+
+
+def extract_tables(doc, start_page=None, end_page=None):
     """
     Extract tables from document with their captions and content.
     Looks for 'Table' caption in section_header or caption above/below the table.
+
+    Args:
+        doc: The parsed document
+        start_page: First page to include (1-indexed, inclusive)
+        end_page: Last page to include (1-indexed, inclusive)
     """
     items = list(doc.iterate_items())
     tables = []
@@ -44,6 +60,10 @@ def extract_tables(doc):
 
         caption = None
         page = item.prov[0].page_no if hasattr(item, 'prov') and item.prov else None
+
+        # Filter by page range
+        if not is_in_page_range(page, start_page, end_page):
+            continue
 
         # Look above for caption starting with "Table"
         if i > 0:
@@ -76,7 +96,7 @@ def extract_tables(doc):
     return tables
 
 
-def extract_figures(doc, output_dir="figures", spec=None):
+def extract_figures(doc, output_dir="figures", spec=None, start_page=None, end_page=None):
     """
     Extract figures from document with their captions.
     Saves images to files and stores base64 in the output.
@@ -85,6 +105,8 @@ def extract_figures(doc, output_dir="figures", spec=None):
         doc: The parsed document
         output_dir: Base directory for figures (will use output_dir/{spec}/ if spec provided)
         spec: Specification identifier for organizing output
+        start_page: First page to include (1-indexed, inclusive)
+        end_page: Last page to include (1-indexed, inclusive)
     """
     # If spec is provided, use figures/{spec}/ subdirectory
     if spec:
@@ -102,6 +124,10 @@ def extract_figures(doc, output_dir="figures", spec=None):
 
         caption = None
         page = item.prov[0].page_no if hasattr(item, 'prov') and item.prov else None
+
+        # Filter by page range
+        if not is_in_page_range(page, start_page, end_page):
+            continue
 
         # Look above for caption starting with "Figure"
         if i > 0:
@@ -156,7 +182,7 @@ def extract_figures(doc, output_dir="figures", spec=None):
     return figures
 
 
-def extract_sections(pdf_path, output_path, spec=None):
+def extract_sections(pdf_path, output_path, spec=None, start_page=None, end_page=None):
     """
     Extract sections from a PDF file and save to JSON.
 
@@ -164,6 +190,8 @@ def extract_sections(pdf_path, output_path, spec=None):
         pdf_path: Path to the PDF file
         output_path: Path for the output JSON file
         spec: Specification identifier (e.g., "80211be", "80211bn")
+        start_page: First page to include (1-indexed, inclusive)
+        end_page: Last page to include (1-indexed, inclusive)
 
     Returns:
         List of extracted sections
@@ -188,6 +216,11 @@ def extract_sections(pdf_path, output_path, spec=None):
     for item, level in doc.iterate_items():
         label = getattr(item, "label", None)
         text = getattr(item, "text", "").strip()
+        page = item.prov[0].page_no if hasattr(item, 'prov') and item.prov else None
+
+        # Filter by page range
+        if not is_in_page_range(page, start_page, end_page):
+            continue
 
         # Section header must start with a number (e.g., "9.4.2.322.2")
         is_valid_section = (label == "section_header" and
@@ -201,7 +234,6 @@ def extract_sections(pdf_path, output_path, spec=None):
                 sections.append(current_section)
 
             # Start new section
-            page = item.prov[0].page_no if hasattr(item, 'prov') and item.prov else None
             current_section = {
                 "section_title": text,
                 "level": infer_section_level(text),
@@ -218,8 +250,8 @@ def extract_sections(pdf_path, output_path, spec=None):
         sections.append(current_section)
 
     # Extract tables and figures
-    tables = extract_tables(doc)
-    figures = extract_figures(doc, spec=spec)
+    tables = extract_tables(doc, start_page, end_page)
+    figures = extract_figures(doc, spec=spec, start_page=start_page, end_page=end_page)
 
     # Build output with spec metadata if provided
     output = {"sections": sections, "tables": tables, "figures": figures}
@@ -227,10 +259,20 @@ def extract_sections(pdf_path, output_path, spec=None):
         output["spec"] = spec
         output["spec_name"] = SPEC_NAMES.get(spec, f"IEEE 802.11 ({spec})")
 
+    # Add page range info if specified
+    if start_page or end_page:
+        output["page_range"] = {
+            "start": start_page,
+            "end": end_page
+        }
+
     with open(output_path, "w") as f:
         json.dump(output, f, indent=2)
 
-    print(f"Extracted {len(sections)} sections, {len(tables)} tables, {len(figures)} figures to {output_path}")
+    page_info = ""
+    if start_page or end_page:
+        page_info = f" (pages {start_page or 1}-{end_page or 'end'})"
+    print(f"Extracted {len(sections)} sections, {len(tables)} tables, {len(figures)} figures{page_info} to {output_path}")
     if spec:
         print(f"Spec: {output['spec_name']}")
     return sections, tables, figures
@@ -249,6 +291,16 @@ if __name__ == "__main__":
         "--output",
         help="Output JSON filename (default: {spec}_output.json or sections_output.json)"
     )
+    parser.add_argument(
+        "--start-page",
+        type=int,
+        help="First page to extract (1-indexed, inclusive)"
+    )
+    parser.add_argument(
+        "--end-page",
+        type=int,
+        help="Last page to extract (1-indexed, inclusive)"
+    )
 
     args = parser.parse_args()
 
@@ -260,4 +312,10 @@ if __name__ == "__main__":
     else:
         output_path = "sections_output.json"
 
-    extract_sections(args.pdf, output_path, spec=args.spec)
+    extract_sections(
+        args.pdf,
+        output_path,
+        spec=args.spec,
+        start_page=args.start_page,
+        end_page=args.end_page
+    )

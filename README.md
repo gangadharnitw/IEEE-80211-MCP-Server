@@ -48,6 +48,9 @@ python chunk_pdf.py --pdf 80211be-2024.pdf --spec 80211be
 # Extract 802.11bn (Wi-Fi 8)
 python chunk_pdf.py --pdf 80211bn-2025.pdf --spec 80211bn
 # Creates: 80211bn_output.json, figures/80211bn/
+
+# Extract specific page range (for large PDFs)
+python chunk_pdf.py --pdf 80211be-2024.pdf --spec 80211be --start-page 240 --end-page 500
 ```
 
 ### 4. Store in Vector Database
