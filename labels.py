@@ -1,0 +1,11 @@
+from docling.document_converter import DocumentConverter                                                                                                                                                  
+                                                                                                                                                                                                        
+converter = DocumentConverter()                                                                                                                                                                           
+result = converter.convert('Test.pdf')                                                                                                                                                                    
+doc = result.document                                                                                                                                                                                     
+                                                                                                                                                                                                        
+print('All labels in document:')                                                                                                                                                                          
+for item, level in doc.iterate_items():                                                                                                                                                                   
+    label = getattr(item, 'label', None)                                                                                                                                                                  
+    text = getattr(item, 'text', '')[:60] if hasattr(item, 'text') else ''                                                                                                                                
+    print(f'{label}: {text}...')                            

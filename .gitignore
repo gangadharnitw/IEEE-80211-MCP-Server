@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.env
+
+# ChromaDB (can be regenerated)
+chroma_db/
+
+# PDFs (too large, copyrighted)
+*.pdf
+
+# IDE
+.vscode/
+*.code-workspace
+.idea/
+
+# Claude
+.claude/
+
+# Config files with sensitive info
+claude_desktop_config*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Extracted data (can be regenerated)
+sections_output.json
